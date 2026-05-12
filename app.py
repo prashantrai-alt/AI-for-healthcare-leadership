@@ -2,6 +2,7 @@ import streamlit as st
 import google.generativeai as genai
 import json
 import re
+import time
 
 # Configure the look of your app
 st.set_page_config(page_title="Continuous Learning AI", layout="wide")
@@ -81,6 +82,19 @@ if choice == "Chatbot Support":
                     clean_json = re.sub(r'```json\n|```', '', raw_diagnosis).strip()
                     profile_data = json.loads(clean_json)
                     st.session_state.diagnostic_profile = profile_data
+                except Exception as e:
+                    pass 
+
+                try:
+                    raw_diagnosis = model.generate_content(diagnostic_prompt).text
+                    clean_json = re.sub(r'```json\n|```', '', raw_diagnosis).strip()
+                    profile_data = json.loads(clean_json)
+                    st.session_state.diagnostic_profile = profile_data
+                    
+                    # --- ADD THE PAUSE HERE ---
+                    time.sleep(2) # Waits for 2 seconds before the next call
+                    # --------------------------
+
                 except Exception as e:
                     pass 
 
