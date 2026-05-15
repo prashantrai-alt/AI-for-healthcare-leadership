@@ -25,9 +25,14 @@ if "diagnostic_profile" not in st.session_state:
         "core_skill_needed": "Pending..."
     }
 
-# NEW: Memory for the generated lesson so it doesn't disappear
 if "microlearning_content" not in st.session_state:
     st.session_state.microlearning_content = ""
+
+# --- LOGIN MEMORY SETUP ---
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+if "username" not in st.session_state:
+    st.session_state.username = ""
 
 # --- SECURE API KEY SETUP ---
 try:
@@ -38,186 +43,209 @@ except KeyError:
     st.error("⚠️ API Key not found! Please check your .streamlit/secrets.toml file.")
     st.stop()
 
-# --- SIDEBAR UI ---
-st.sidebar.title("App Navigation")
-menu = ["Chatbot Support", "Scenario Simulations", "Adaptive Microlearning", "Burnout Support"]
-choice = st.sidebar.radio("Go to:", menu)
 
-st.sidebar.divider()
-
-st.sidebar.subheader("🧠 Live Diagnostic Profile")
-st.sidebar.info(
-    f"**Topic:** {st.session_state.diagnostic_profile.get('topic', 'N/A')}\n\n"
-    f"**Emotion:** {st.session_state.diagnostic_profile.get('emotion', 'N/A')}\n\n"
-    f"**Target Skill:** {st.session_state.diagnostic_profile.get('core_skill_needed', 'N/A')}"
-)
-
-# --- 1. THE DIAGNOSTIC CHATBOT ---
-if choice == "Chatbot Support":
-    st.header("Diagnostic Chatbot")
-    st.write("Discuss a leadership challenge. The AI will coach you while silently building your learning profile.")
+# ==========================================
+# --- LOGIN GATEWAY ---
+# ==========================================
+if not st.session_state.logged_in:
+    st.subheader("🔒 Secure Login")
     
-    for message in st.session_state.chat_history:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
-
-    if user_input := st.chat_input("What challenge are you facing today?"):
+    with st.form("login_form"):
+        username_input = st.text_input("Username")
+        password_input = st.text_input("Password", type="password")
+        submit_button = st.form_submit_button("Login")
         
-        with st.chat_message("user"):
-            st.markdown(user_input)
-        st.session_state.chat_history.append({"role": "user", "content": user_input})
+        if submit_button:
+            # Test credentials!
+            if username_input == "dr_smith" and password_input == "health123":
+                st.session_state.logged_in = True
+                st.session_state.username = "Dr. Smith"
+                st.success("Login successful!")
+                st.rerun() 
+            else:
+                st.error("⚠️ Invalid username or password. Please try again.")
 
-        with st.chat_message("assistant"):
-            with st.spinner("Analyzing your profile and generating advice..."):
-                
-                # PHASE A: THE SILENT DIAGNOSTIC
-                diagnostic_prompt = f"""
-                Analyze this healthcare leader's statement: '{user_input}'.
-                Identify the core issue, their emotional state, and the primary leadership skill they need to develop.
-                Return ONLY a valid JSON object with exactly these three keys: "topic", "emotion", "core_skill_needed".
-                Do not include any other text.
-                """
-                try:
-                    raw_diagnosis = model.generate_content(diagnostic_prompt).text
-                    clean_json = re.sub(r'```json\n|```', '', raw_diagnosis).strip()
-                    profile_data = json.loads(clean_json)
-                    st.session_state.diagnostic_profile = profile_data
-                except Exception as e:
-                    pass 
-
-                try:
-                    raw_diagnosis = model.generate_content(diagnostic_prompt).text
-                    clean_json = re.sub(r'```json\n|```', '', raw_diagnosis).strip()
-                    profile_data = json.loads(clean_json)
-                    st.session_state.diagnostic_profile = profile_data
-                    
-                    # --- ADD THE PAUSE HERE ---
-                    time.sleep(2) # Waits for 2 seconds before the next call
-                    # --------------------------
-
-                except Exception as e:
-                    pass 
-
-                # PHASE B: THE ACTUAL CHATBOT REPLY
-                history_text = "\n".join([f"{m['role']}: {m['content']}" for m in st.session_state.chat_history])
-                chat_prompt = f"""You are an expert healthcare leadership mentor. 
-                Conversation history: {history_text}
-                INSTRUCTIONS:
-                Provide a CLEAR, DIRECT, ACTIONABLE solution to their problem.
-                Then, ask ONE follow-up question to help them apply it."""
-                
-                response = model.generate_content(chat_prompt)
-                st.markdown(response.text)
-        
-        st.session_state.chat_history.append({"role": "assistant", "content": response.text})
+# ==========================================
+# --- THE MAIN APP (Only runs if logged in) ---
+# ==========================================
+else:
+    # --- SIDEBAR UI ---
+    st.sidebar.success(f"👤 Welcome back, {st.session_state.username}")
+    if st.sidebar.button("Logout"):
+        st.session_state.logged_in = False
+        st.session_state.chat_history = [] # Clear history on logout
+        st.session_state.diagnostic_profile = {"topic": "Pending...", "emotion": "Pending...", "core_skill_needed": "Pending..."}
         st.rerun()
+        
+    st.sidebar.divider()
+    
+    st.sidebar.title("App Navigation")
+    menu = ["Chatbot Support", "Scenario Simulations", "Adaptive Microlearning", "Burnout Support"]
+    choice = st.sidebar.radio("Go to:", menu)
+
+    st.sidebar.divider()
+
+    st.sidebar.subheader("🧠 Live Diagnostic Profile")
+    st.sidebar.info(
+        f"**Topic:** {st.session_state.diagnostic_profile.get('topic', 'N/A')}\n\n"
+        f"**Emotion:** {st.session_state.diagnostic_profile.get('emotion', 'N/A')}\n\n"
+        f"**Target Skill:** {st.session_state.diagnostic_profile.get('core_skill_needed', 'N/A')}"
+    )
+
+    # --- 1. THE DIAGNOSTIC CHATBOT ---
+    if choice == "Chatbot Support":
+        st.header("Diagnostic Chatbot")
+        st.write("Discuss a leadership challenge. The AI will coach you while silently building your learning profile.")
+        
+        for message in st.session_state.chat_history:
+            with st.chat_message(message["role"]):
+                st.markdown(message["content"])
+
+        if user_input := st.chat_input("What challenge are you facing today?"):
             
-    if st.button("Clear Chat History"):
-        st.session_state.chat_history = []
-        st.rerun()
+            with st.chat_message("user"):
+                st.markdown(user_input)
+            st.session_state.chat_history.append({"role": "user", "content": user_input})
 
-# --- 2. SCENARIO SIMULATIONS ---
-elif choice == "Scenario Simulations":
-    st.header("Dynamic Scenario Simulation")
-    profile = st.session_state.diagnostic_profile
-    
-    if profile["topic"] == "Pending...":
-        st.warning("⚠️ Please chat with the Diagnostic Chatbot first! The AI needs to build your profile before it can generate a custom simulation.")
-    else:
-        st.success(f"**Scenario customized for you based on:** {profile['topic']} | **Testing your:** {profile['core_skill_needed']}")
-        
-        if not st.session_state.sim_active:
-            if st.button("Generate My Custom Scenario"):
-                st.session_state.sim_active = True
-                with st.spinner("Building a realistic hospital environment..."):
-                    setup_prompt = f"""
-                    You are a healthcare simulation engine. Generate a brief, realistic hospital scenario tailored to this profile:
-                    - Topic: {profile['topic']}
-                    - User's Emotion to manage: {profile['emotion']}
-                    - Leadership Skill to test: {profile['core_skill_needed']}
+            with st.chat_message("assistant"):
+                with st.spinner("Analyzing your profile and generating advice..."):
                     
-                    Set the scene in 3 sentences. End by explicitly asking the user: "What is your immediate first action?" 
+                    # PHASE A: THE SILENT DIAGNOSTIC (Fixed duplicate bug here)
+                    diagnostic_prompt = f"""
+                    Analyze this healthcare leader's statement: '{user_input}'.
+                    Identify the core issue, their emotional state, and the primary leadership skill they need to develop.
+                    Return ONLY a valid JSON object with exactly these three keys: "topic", "emotion", "core_skill_needed".
+                    Do not include any other text.
                     """
-                    response = model.generate_content(setup_prompt)
-                    st.session_state.sim_history.append({"role": "assistant", "content": response.text})
-                    st.rerun()
-        
-        else:
-            for message in st.session_state.sim_history:
-                with st.chat_message(message["role"]):
-                    st.markdown(message["content"])
-            
-            if user_action := st.chat_input("Enter your leadership decision..."):
-                with st.chat_message("user"):
-                    st.markdown(user_action)
-                st.session_state.sim_history.append({"role": "user", "content": user_action})
-                
-                with st.chat_message("assistant"):
-                    with st.spinner("Evaluating your decision..."):
-                        history_text = "\n".join([f"{m['role']}: {m['content']}" for m in st.session_state.sim_history])
-                        eval_prompt = f"""
-                        You are a healthcare leadership evaluator. 
-                        Target Skill being evaluated: {profile['core_skill_needed']}.
-                        Conversation history: {history_text}
+                    try:
+                        raw_diagnosis = model.generate_content(diagnostic_prompt).text
+                        clean_json = re.sub(r'```json\n|```', '', raw_diagnosis).strip()
+                        profile_data = json.loads(clean_json)
+                        st.session_state.diagnostic_profile = profile_data
                         
-                        Evaluate the user's latest action. Provide brief feedback on what they did right or wrong specifically regarding the target skill. 
-                        Then, escalate the scenario and ask for their next move.
-                        """
-                        response = model.generate_content(eval_prompt)
-                        st.markdown(response.text)
-                st.session_state.sim_history.append({"role": "assistant", "content": response.text})
-            
-            if st.button("End Simulation & Reset"):
-                st.session_state.sim_active = False
-                st.session_state.sim_history = []
-                st.rerun()
+                        # Pause to protect the API quota
+                        time.sleep(2) 
+                    except Exception as e:
+                        pass 
 
-# --- 3. ADAPTIVE MICROLEARNING (NEW!) ---
-elif choice == "Adaptive Microlearning":
-    st.header("Adaptive Microlearning Module")
-    profile = st.session_state.diagnostic_profile
-    
-    if profile["topic"] == "Pending...":
-        st.warning("⚠️ Please chat with the Diagnostic Chatbot first to identify your learning needs!")
-    else:
-        st.write("Based on your recent profile, we have curated a custom learning module for you.")
-        st.info(f"**Focus Area:** {profile['core_skill_needed']} in the context of {profile['topic']}")
-        
-        # Button to trigger AI lesson generation
-        if st.button("Generate My Personalized Lesson"):
-            with st.spinner("Curating evidence-based management practices..."):
-                lesson_prompt = f"""
-                You are a healthcare education expert. The user needs to improve their '{profile['core_skill_needed']}' 
-                regarding the topic of '{profile['topic']}'. 
-                
-                Create a highly engaging, 3-minute microlearning module. 
-                It must include:
-                1. A brief theoretical framework or clinical model (e.g., DESC, SBAR, LEAN) applicable to this exact skill.
-                2. 3 actionable bullet points on how a hospital leader can apply it immediately.
-                3. A quick, thought-provoking reflection question at the end.
-                
-                Use bolding and beautiful Markdown formatting. Keep it concise.
-                """
-                response = model.generate_content(lesson_prompt)
-                st.session_state.microlearning_content = response.text
-        
-        # Display the lesson if it exists in memory
-        if st.session_state.microlearning_content != "":
-            st.divider()
-            st.markdown(st.session_state.microlearning_content)
-            st.divider()
+                    # PHASE B: THE ACTUAL CHATBOT REPLY
+                    history_text = "\n".join([f"{m['role']}: {m['content']}" for m in st.session_state.chat_history])
+                    chat_prompt = f"""You are an expert healthcare leadership mentor. 
+                    Conversation history: {history_text}
+                    INSTRUCTIONS:
+                    Provide a CLEAR, DIRECT, ACTIONABLE solution to their problem.
+                    Then, ask ONE follow-up question to help them apply it."""
+                    
+                    response = model.generate_content(chat_prompt)
+                    st.markdown(response.text)
             
-            if st.button("Mark Module Complete"):
-                st.balloons()
-                st.success("🎉 Incredible! You have completed a full Continuous Learning Loop.")
+            st.session_state.chat_history.append({"role": "assistant", "content": response.text})
+            st.rerun()
+                
+        if st.button("Clear Chat History"):
+            st.session_state.chat_history = []
+            st.rerun()
 
-# --- 4. BURNOUT SUPPORT ---
-elif choice == "Burnout Support":
-    st.header("Wellbeing & Workload Management")
-    st.write("Log your shift stress or take a quick mindfulness break to reduce burnout.")
-    stress_level = st.slider("How stressful was your shift today? (1 = Very Calm, 10 = Overwhelming)", 1, 10, 5)
-    if st.button("Log Stress Level"):
-        if stress_level > 7:
-            st.warning("It sounds like a tough day. Please take 5 minutes to unplug, and consider reaching out to a peer for support.")
+    # --- 2. SCENARIO SIMULATIONS ---
+    elif choice == "Scenario Simulations":
+        st.header("Dynamic Scenario Simulation")
+        profile = st.session_state.diagnostic_profile
+        
+        if profile["topic"] == "Pending...":
+            st.warning("⚠️ Please chat with the Diagnostic Chatbot first! The AI needs to build your profile before it can generate a custom simulation.")
         else:
-            st.success("Your stress level has been logged. Keep up the great work!")
+            st.success(f"**Scenario customized for you based on:** {profile['topic']} | **Testing your:** {profile['core_skill_needed']}")
+            
+            if not st.session_state.sim_active:
+                if st.button("Generate My Custom Scenario"):
+                    st.session_state.sim_active = True
+                    with st.spinner("Building a realistic hospital environment..."):
+                        setup_prompt = f"""
+                        You are a healthcare simulation engine. Generate a brief, realistic hospital scenario tailored to this profile:
+                        - Topic: {profile['topic']}
+                        - User's Emotion to manage: {profile['emotion']}
+                        - Leadership Skill to test: {profile['core_skill_needed']}
+                        
+                        Set the scene in 3 sentences. End by explicitly asking the user: "What is your immediate first action?" 
+                        """
+                        response = model.generate_content(setup_prompt)
+                        st.session_state.sim_history.append({"role": "assistant", "content": response.text})
+                        st.rerun()
+            
+            else:
+                for message in st.session_state.sim_history:
+                    with st.chat_message(message["role"]):
+                        st.markdown(message["content"])
+                
+                if user_action := st.chat_input("Enter your leadership decision..."):
+                    with st.chat_message("user"):
+                        st.markdown(user_action)
+                    st.session_state.sim_history.append({"role": "user", "content": user_action})
+                    
+                    with st.chat_message("assistant"):
+                        with st.spinner("Evaluating your decision..."):
+                            history_text = "\n".join([f"{m['role']}: {m['content']}" for m in st.session_state.sim_history])
+                            eval_prompt = f"""
+                            You are a healthcare leadership evaluator. 
+                            Target Skill being evaluated: {profile['core_skill_needed']}.
+                            Conversation history: {history_text}
+                            
+                            Evaluate the user's latest action. Provide brief feedback on what they did right or wrong specifically regarding the target skill. 
+                            Then, escalate the scenario and ask for their next move.
+                            """
+                            response = model.generate_content(eval_prompt)
+                            st.markdown(response.text)
+                    st.session_state.sim_history.append({"role": "assistant", "content": response.text})
+                
+                if st.button("End Simulation & Reset"):
+                    st.session_state.sim_active = False
+                    st.session_state.sim_history = []
+                    st.rerun()
+
+    # --- 3. ADAPTIVE MICROLEARNING ---
+    elif choice == "Adaptive Microlearning":
+        st.header("Adaptive Microlearning Module")
+        profile = st.session_state.diagnostic_profile
+        
+        if profile["topic"] == "Pending...":
+            st.warning("⚠️ Please chat with the Diagnostic Chatbot first to identify your learning needs!")
+        else:
+            st.write("Based on your recent profile, we have curated a custom learning module for you.")
+            st.info(f"**Focus Area:** {profile['core_skill_needed']} in the context of {profile['topic']}")
+            
+            if st.button("Generate My Personalized Lesson"):
+                with st.spinner("Curating evidence-based management practices..."):
+                    lesson_prompt = f"""
+                    You are a healthcare education expert. The user needs to improve their '{profile['core_skill_needed']}' 
+                    regarding the topic of '{profile['topic']}'. 
+                    
+                    Create a highly engaging, 3-minute microlearning module. 
+                    It must include:
+                    1. A brief theoretical framework or clinical model (e.g., DESC, SBAR, LEAN) applicable to this exact skill.
+                    2. 3 actionable bullet points on how a hospital leader can apply it immediately.
+                    3. A quick, thought-provoking reflection question at the end.
+                    
+                    Use bolding and beautiful Markdown formatting. Keep it concise.
+                    """
+                    response = model.generate_content(lesson_prompt)
+                    st.session_state.microlearning_content = response.text
+            
+            if st.session_state.microlearning_content != "":
+                st.divider()
+                st.markdown(st.session_state.microlearning_content)
+                st.divider()
+                
+                if st.button("Mark Module Complete"):
+                    st.balloons()
+                    st.success("🎉 Incredible! You have completed a full Continuous Learning Loop.")
+
+    # --- 4. BURNOUT SUPPORT ---
+    elif choice == "Burnout Support":
+        st.header("Wellbeing & Workload Management")
+        st.write("Log your shift stress or take a quick mindfulness break to reduce burnout.")
+        stress_level = st.slider("How stressful was your shift today? (1 = Very Calm, 10 = Overwhelming)", 1, 10, 5)
+        if st.button("Log Stress Level"):
+            if stress_level > 7:
+                st.warning("It sounds like a tough day. Please take 5 minutes to unplug, and consider reaching out to a peer for support.")
+            else:
+                st.success("Your stress level has been logged. Keep up the great work!")
