@@ -1,218 +1,314 @@
 import streamlit as st
 import google.generativeai as genai
-from supabase import create_client, Client
+import json
+import re
+import time
 import hashlib
+from supabase import create_client, Client
 
-# --- 1. INITIALIZE SUPABASE CLIENT ---
-url: str = st.secrets["SUPABASE_URL"]
-key: str = st.secrets["SUPABASE_KEY"]
-supabase: Client = create_client(url, key)
+# Configure the look of your app
+st.set_page_config(page_title="Continuous Learning AI", layout="wide")
+st.title("Healthcare Leadership AI Co-Pilot")
+st.write("An integrated platform for continuous competency development.")
 
-# --- 2. CONFIGURE GEMINI AI ---
-genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-model = genai.GenerativeModel('gemini-2.5-flash')
+# --- MEMORY SETUP ---
+if "sim_history" not in st.session_state:
+    st.session_state.sim_history = []
+if "sim_active" not in st.session_state:
+    st.session_state.sim_active = False
 
-# --- 3. DATABASE HELPER FUNCTIONS (AUTHENTICATION) ---
-def make_hashes(password):
-    return hashlib.sha256(str.encode(password)).hexdigest()
+if "diagnostic_profile" not in st.session_state:
+    st.session_state.diagnostic_profile = {
+        "topic": "Pending...", 
+        "emotion": "Pending...", 
+        "core_skill_needed": "Pending..."
+    }
 
-def check_user_exists(username):
-    response = supabase.table("profiles").select("*").eq("username", username).execute()
-    return len(response.data) > 0
+if "microlearning_content" not in st.session_state:
+    st.session_state.microlearning_content = ""
 
-def add_user(username, password):
-    hashed_pw = make_hashes(password)
-    supabase.table("profiles").insert({"username": username, "password": hashed_pw}).execute()
-
-def login_user(username, password):
-    hashed_pw = make_hashes(password)
-    response = supabase.table("profiles").select("*").eq("username", username).eq("password", hashed_pw).execute()
-    return len(response.data) > 0
-
-# --- 4. DATABASE HELPER FUNCTIONS (CHAT HISTORY) ---
-def load_chat_history(username):
-    response = supabase.table("chat_messages").select("*").eq("username", username).order("id", desc=False).execute()
-    return response.data
-
-def save_chat_message(username, role, content):
-    supabase.table("chat_messages").insert({"username": username, "role": role, "content": content}).execute()
-
-
-# --- 5. STREAMLIT SESSION STATE SETUP ---
+# --- LOGIN MEMORY SETUP ---
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 if "username" not in st.session_state:
     st.session_state.username = ""
 
-# --- 6. APPLICATION GATEWAY (AUTH SCREEN) ---
-if not st.session_state.logged_in:
-    st.title("Healthcare Leadership AI Co-Pilot")
-    st.subheader("Please Log In or Sign Up to Access the Platform")
+# --- SECURE API CONNECTIVITY (Gemini & Supabase) ---
+try:
+    # Gemini Setup
+    api_key = st.secrets["GEMINI_API_KEY"]
+    genai.configure(api_key=api_key)
+    model = genai.GenerativeModel('gemini-2.5-flash')
     
-    tab1, tab2 = st.tabs(["Login", "Sign Up"])
-    
-    with tab1:
-        st.subheader("Login to Your Account")
-        login_username = st.text_input("Username", key="login_user")
-        login_password = st.text_input("Password", type="password", key="login_pass")
-        
-        if st.button("Login"):
-            if login_user(login_username, login_password):
-                st.session_state.logged_in = True
-                st.session_state.username = login_username
-                st.success(f"Welcome back, {login_username}!")
-                st.rerun()
-            else:
-                st.error("Invalid Username or Password")
-                
-    with tab2:
-        st.subheader("Create a New Account")
-        new_username = st.text_input("Choose a Username", key="new_user")
-        new_password = st.text_input("Choose a Password", type="password", key="new_pass")
-        confirm_password = st.text_input("Confirm Password", type="password", key="confirm_pass")
-        
-        if st.button("Sign Up"):
-            if new_password != confirm_password:
-                st.error("Passwords do not match!")
-            elif check_user_exists(new_username):
-                st.error("Username already taken! Please pick another one.")
-            elif new_username.strip() == "" or new_password.strip() == "":
-                st.error("Fields cannot be left blank.")
-            else:
-                add_user(new_username, new_password)
-                st.success("Account created successfully! Go to the Login tab to log in.")
+    # Supabase Setup
+    url: str = st.secrets["SUPABASE_URL"]
+    key: str = st.secrets["SUPABASE_KEY"]
+    supabase: Client = create_client(url, key)
+except KeyError:
+    st.error("⚠️ Configuration Keys not found! Please check your Streamlit Secrets setting.")
+    st.stop()
 
-# --- 7. MAIN PLATFORM INTERFACE (RESTORED FEATURES) ---
+# --- SECURITY HANDLERS ---
+def make_hashes(password):
+    return hashlib.sha256(str.encode(password)).hexdigest()
+
+def add_userdata(username, password):
+    supabase.table("profiles").insert({"username": username, "password": password}).execute()
+
+def login_user(username, password):
+    response = supabase.table("profiles").select("*").eq("username", username).eq("password", password).execute()
+    return response.data
+
+# --- DATABASE CHAT HISTORY HANDLERS ---
+def load_chat_history(username):
+    try:
+        response = supabase.table("chat_messages").select("*").eq("username", username).order("id", desc=False).execute()
+        return response.data
+    except Exception:
+        return []
+
+def save_chat_message(username, role, content):
+    try:
+        supabase.table("chat_messages").insert({"username": username, "role": role, "content": content}).execute()
+    except Exception:
+        pass
+
+
+# ==========================================
+# --- SUPABASE LOGIN/SIGNUP GATEWAY ---
+# ==========================================
+if not st.session_state.logged_in:
+    tab1, tab2 = st.tabs(["Login", "Sign Up"])
+
+    with tab1:
+        st.subheader("Login")
+        with st.form("login_form"):
+            user_log = st.text_input("Username")
+            pass_log = st.text_input("Password", type="password")
+            if st.form_submit_button("Login"):
+                hashed_pswd = make_hashes(pass_log)
+                result = login_user(user_log, hashed_pswd)
+                
+                if result:
+                    st.session_state.logged_in = True
+                    st.session_state.username = user_log
+                    st.success(f"Welcome back, {user_log}!")
+                    st.rerun()
+                else:
+                    st.error("⚠️ Invalid username or password.")
+
+    with tab2:
+        st.subheader("Create New Account")
+        with st.form("signup_form"):
+            new_user = st.text_input("Choose a Username")
+            new_pass = st.text_input("Choose a Password", type="password")
+            confirm_pass = st.text_input("Confirm Password", type="password")
+            
+            if st.form_submit_button("Sign Up"):
+                if new_pass != confirm_pass:
+                    st.error("⚠️ Passwords do not match!")
+                elif len(new_pass) < 4:
+                    st.error("⚠️ Password must be at least 4 characters.")
+                elif not new_user.strip():
+                    st.error("⚠️ Username cannot be blank.")
+                else:
+                    # Check if user already exists
+                    existing = supabase.table("profiles").select("username").eq("username", new_user).execute()
+                    if existing.data:
+                        st.warning("⚠️ Username already exists.")
+                    else:
+                        add_userdata(new_user, make_hashes(new_pass))
+                        st.success("🎉 Account created successfully! You can now log in.")
+
+# ==========================================
+# --- THE MAIN APP (Only runs if logged in) ---
+# ==========================================
 else:
-    username = st.session_state.username
+    # --- SIDEBAR UI ---
+    st.sidebar.success(f"👤 Welcome back, {st.session_state.username}")
+    if st.sidebar.button("Logout"):
+        st.session_state.logged_in = False
+        st.session_state.diagnostic_profile = {"topic": "Pending...", "emotion": "Pending...", "core_skill_needed": "Pending..."}
+        st.session_state.microlearning_content = ""
+        st.rerun()
+        
+    st.sidebar.divider()
     
-    # --- FEATURE: LIVE SIDEBAR DIAGNOSTICS ---
-    with st.sidebar:
-        st.title("Executive Dashboard")
-        st.write(f"User: **{username}**")
+    st.sidebar.title("App Navigation")
+    menu = ["Chatbot Support", "Scenario Simulations", "Adaptive Microlearning", "Burnout Support"]
+    choice = st.sidebar.radio("Go to:", menu)
+
+    st.sidebar.divider()
+
+    st.sidebar.subheader("🧠 Live Diagnostic Profile")
+    st.sidebar.info(
+        f"**Topic:** {st.session_state.diagnostic_profile.get('topic', 'N/A')}\n\n"
+        f"**Emotion:** {st.session_state.diagnostic_profile.get('emotion', 'N/A')}\n\n"
+        f"**Target Skill:** {st.session_state.diagnostic_profile.get('core_skill_needed', 'N/A')}"
+    )
+
+    # --- 1. THE DIAGNOSTIC CHATBOT ---
+    if choice == "Chatbot Support":
+        st.header("Diagnostic Chatbot")
+        st.write("Discuss a leadership challenge. The AI will coach you while silently building your learning profile.")
         
-        st.markdown("---")
-        st.subheader("📊 Leadership Diagnostics")
-        st.caption("Real-time metric tracking based on your interactions.")
+        # Pull past logs dynamically from the secure Supabase table
+        db_messages = load_chat_history(st.session_state.username)
         
-        st.progress(85, text="Communication Effectiveness")
-        st.progress(70, text="Crisis & Shortage Management")
-        st.progress(78, text="Strategic Resource Allocation")
-        st.progress(92, text="Bioethics & Compliance")
-        
-        st.markdown("---")
-        if st.button("Log Out of System", use_container_width=True):
-            st.session_state.logged_in = False
-            st.session_state.username = ""
-            st.rerun()
+        for message in db_messages:
+            with st.chat_message(message["role"]):
+                st.markdown(message["content"])
+
+        if user_input := st.chat_input("What challenge are you facing today?"):
             
-    # Main Application Header
-    st.title("Healthcare Leadership AI Co-Pilot")
-    st.write(f"Welcome back, **Director {username}**!")
-    
-    # --- FEATURE: APP NAVIGATION TABS ---
-    tab_chat, tab_simulation, tab_learning = st.tabs([
-        "💬 AI Mentor Chatbot", 
-        "🎭 Scenario Simulations", 
-        "📚 Microlearning Modules"
-    ])
-    
-    # ==========================================
-    # TAB 1: AI MENTOR CHATBOT (DATABASE CONNECTED)
-    # ==========================================
-    with tab_chat:
-        st.subheader("Executive Advisory Session")
-        st.info("Your chat logs are securely compiled and archived in your Supabase Cloud Database.")
-        
-        # Load past messages from Supabase cloud database
-        db_messages = load_chat_history(username)
-        
-        # Display the full conversation history from database records
-        for msg in db_messages:
-            with st.chat_message(msg["role"]):
-                st.write(msg["content"])
-                
-        # Handle new user chat input
-        if user_input := st.chat_input("Consult your mentor regarding hospital operations, staff conflicts, or board metrics..."):
             with st.chat_message("user"):
-                st.write(user_input)
-                
-            # Save user message permanently to Supabase cloud
-            save_chat_message(username, "user", user_input)
+                st.markdown(user_input)
             
-            # Rebuild full conversation context for Gemini using the database records
-            history_context = "\n".join([f"{m['role']}: {m['content']}" for m in db_messages]) + f"\nuser: {user_input}"
+            # Commit the user message to the database immediately
+            save_chat_message(st.session_state.username, "user", user_input)
             
+            # Context window array for the AI runtime engine
+            current_history = db_messages + [{"role": "user", "content": user_input}]
+
             with st.chat_message("assistant"):
-                with st.spinner("Analyzing operational directives..."):
-                    chat_prompt = f"""You are an elite, highly experienced expert healthcare leadership mentor and hospital consultant.
-                    Conversation history context:
-                    {history_context}
+                with st.spinner("Analyzing your profile and generating advice..."):
                     
-                    Provide a CLEAR, DIRECT, STRATEGIC, and ACTIONABLE solution to their problem. Focus on healthcare operational efficiency, patient safety, or clinical morale.
-                    Then, end your response by asking exactly ONE targeted follow-up question to help them apply it to their specific department."""
+                    # PHASE A: THE SILENT DIAGNOSTIC
+                    diagnostic_prompt = f"""
+                    Analyze this healthcare leader's statement: '{user_input}'.
+                    Identify the core issue, their emotional state, and the primary leadership skill they need to develop.
+                    Return ONLY a valid JSON object with exactly these three keys: "topic", "emotion", "core_skill_needed".
+                    Do not include any other text.
+                    """
+                    try:
+                        raw_diagnosis = model.generate_content(diagnostic_prompt).text
+                        clean_json = re.sub(r'```json\n|```', '', raw_diagnosis).strip()
+                        profile_data = json.loads(clean_json)
+                        st.session_state.diagnostic_profile = profile_data
+                        
+                        time.sleep(2) 
+                    except Exception as e:
+                        pass 
+
+                    # PHASE B: THE ACTUAL CHATBOT REPLY
+                    history_text = "\n".join([f"{m['role']}: {m['content']}" for m in current_history])
+                    chat_prompt = f"""You are an expert healthcare leadership mentor. 
+                    Conversation history: {history_text}
+                    INSTRUCTIONS:
+                    Provide a CLEAR, DIRECT, ACTIONABLE solution to their problem.
+                    Then, ask ONE follow-up question to help them apply it."""
                     
                     response = model.generate_content(chat_prompt)
-                    st.write(response.text)
-                    
-            # Save AI response permanently to Supabase cloud
-            save_chat_message(username, "assistant", response.text)
+                    st.markdown(response.text)
             
-    # ==========================================
-    # TAB 2: SCENARIO SIMULATIONS (AI POWERED)
-    # ==========================================
-    with tab_simulation:
-        st.subheader("Interactive Crisis Management Simulation")
-        st.write("Select an operational emergency scenario to test your situational leadership decisions:")
-        
-        scenario_choice = st.selectbox("Choose a Scenario Blueprint:", [
-            "Select a scenario...",
-            "Sudden ICU Nursing Staff Shortage & Burnout Crisis",
-            "Emergency Department Overcrowding & Diversion Dilemma",
-            "Cross-Departmental Conflict: Surgery vs. Anesthesiology Chiefs",
-            "Cybersecurity Ransomware Attack on Electronic Health Records (EHR)"
-        ])
-        
-        if scenario_choice != "Select a scenario...":
-            st.markdown(f"### 🚩 Active Case Study: {scenario_choice}")
-            
-            if st.button("Generate AI Case Briefing & Challenge"):
-                with st.spinner("Formulating simulation parameters..."):
-                    sim_prompt = f"""Act as a healthcare leadership simulation coordinator. 
-                    Generate a high-stakes, 2-paragraph operational briefing regarding this scenario: '{scenario_choice}'. 
-                    Conclude with a critical choice or dilemma that a hospital administrator must make immediately."""
-                    sim_response = model.generate_content(sim_prompt)
-                    st.markdown("---")
-                    st.write(sim_response.text)
-                    
-            sim_answer = st.text_area("Type your executive action plan or response to this crisis:")
-            if st.button("Submit Action Plan for Board Evaluation"):
-                with st.spinner("Reviewing response against clinical compliance metrics..."):
-                    # FIXED: Swapped to triple quotes to safely support wrapping code layout strings
-                    eval_prompt = f"""Evaluate the following leadership action plan for the scenario '{scenario_choice}'. 
-                    Action Plan: '{sim_answer}'. 
-                    Provide a brief score outline highlighting Strengths, Hidden Risks, and an Overall Leadership Grade (A, B, C, or F)."""
-                    eval_response = model.generate_content(eval_prompt)
-                    st.success("Board Review Complete!")
-                    st.markdown(eval_response.text)
+            # Archive the AI response to the database table
+            save_chat_message(st.session_state.username, "assistant", response.text)
+            st.rerun()
+                
+        if st.button("Clear Chat History"):
+            supabase.table("chat_messages").delete().eq("username", st.session_state.username).execute()
+            st.rerun()
 
-    # ==========================================
-    # TAB 3: MICROLEARNING MODULES (AI POWERED)
-    # ==========================================
-    with tab_learning:
-        st.subheader("Just-In-Time Executive Microlearning")
-        st.write("Generate custom, high-density professional development briefings on demand.")
+    # --- 2. SCENARIO SIMULATIONS ---
+    elif choice == "Scenario Simulations":
+        st.header("Dynamic Scenario Simulation")
+        profile = st.session_state.diagnostic_profile
         
-        learning_topic = st.text_input("Enter a leadership skill or framework (e.g., 'Just Culture in Patient Safety', 'Lean Six Sigma in Clinic Workflows', 'Managing Resident Physician Fatigue'):")
-        
-        if st.button("Generate Targeted Micro-Lesson"):
-            if learning_topic.strip() != "":
-                with st.spinner("Synthesizing learning assets..."):
-                    # FIXED: Added triple quotes here as well for safety
-                    lesson_prompt = f"""Create a high-impact, professional microlearning briefing for a healthcare executive regarding: '{learning_topic}'. 
-                    Format it with a 'Core Concept Summary', '3 Direct Actionable Implementation Tactics', and a 'Real-World Hospital Case Example'."""
-                    lesson_response = model.generate_content(lesson_prompt)
-                    st.markdown("---")
-                    st.write(lesson_response.text)
+        if profile["topic"] == "Pending...":
+            st.warning("⚠️ Please chat with the Diagnostic Chatbot first! The AI needs to build your profile before it can generate a custom simulation.")
+        else:
+            st.success(f"**Scenario customized for you based on:** {profile['topic']} | **Testing your:** {profile['core_skill_needed']}")
+            
+            if not st.session_state.sim_active:
+                if st.button("Generate My Custom Scenario"):
+                    st.session_state.sim_active = True
+                    with st.spinner("Building a realistic hospital environment..."):
+                        setup_prompt = f"""
+                        You are a healthcare simulation engine. Generate a brief, realistic hospital scenario tailored to this profile:
+                        - Topic: {profile['topic']}
+                        - User's Emotion to manage: {profile['emotion']}
+                        - Leadership Skill to test: {profile['core_skill_needed']}
+                        
+                        Set the scene in 3 sentences. End by explicitly asking the user: "What is your immediate first action?" 
+                        """
+                        response = model.generate_content(setup_prompt)
+                        st.session_state.sim_history.append({"role": "assistant", "content": response.text})
+                        st.rerun()
+            
             else:
-                st.warning("Please type a topic to generate a lesson outline.")
+                for message in st.session_state.sim_history:
+                    with st.chat_message(message["role"]):
+                        st.markdown(message["content"])
+                
+                if user_action := st.chat_input("Enter your leadership decision..."):
+                    with st.chat_message("user"):
+                        st.markdown(user_action)
+                    st.session_state.sim_history.append({"role": "user", "content": user_action})
+                    
+                    with st.chat_message("assistant"):
+                        with st.spinner("Evaluating your decision..."):
+                            history_text = "\n".join([f"{m['role']}: {m['content']}" for m in st.session_state.sim_history])
+                            eval_prompt = f"""
+                            You are a healthcare leadership evaluator. 
+                            Target Skill being evaluated: {profile['core_skill_needed']}.
+                            Conversation history: {history_text}
+                            
+                            Evaluate the user's latest action. Provide brief feedback on what they did right or wrong specifically regarding the target skill. 
+                            Then, escalate the scenario and ask for their next move.
+                            """
+                            response = model.generate_content(eval_prompt)
+                            st.markdown(response.text)
+                    st.session_state.sim_history.append({"role": "assistant", "content": response.text})
+                
+                if st.button("End Simulation & Reset"):
+                    st.session_state.sim_active = False
+                    st.session_state.sim_history = []
+                    st.rerun()
+
+    # --- 3. ADAPTIVE MICROLEARNING ---
+    elif choice == "Adaptive Microlearning":
+        st.header("Adaptive Microlearning Module")
+        profile = st.session_state.diagnostic_profile
+        
+        if profile["topic"] == "Pending...":
+            st.warning("⚠️ Please chat with the Diagnostic Chatbot first to identify your learning needs!")
+        else:
+            st.write("Based on your recent profile, we have curated a custom learning module for you.")
+            st.info(f"**Focus Area:** {profile['core_skill_needed']} in the context of {profile['topic']}")
+            
+            if st.button("Generate My Personalized Lesson"):
+                with st.spinner("Curating evidence-based management practices..."):
+                    lesson_prompt = f"""
+                    You are a healthcare education expert. The user needs to improve their '{profile['core_skill_needed']}' 
+                    regarding the topic of '{profile['topic']}'. 
+                    
+                    Create a highly engaging, 3-minute microlearning module. 
+                    It must include:
+                    1. A brief theoretical framework or clinical model (e.g., DESC, SBAR, LEAN) applicable to this exact skill.
+                    2. 3 actionable bullet points on how a hospital leader can apply it immediately.
+                    3. A quick, thought-provoking reflection question at the end.
+                    
+                    Use bolding and beautiful Markdown formatting. Keep it concise.
+                    """
+                    response = model.generate_content(lesson_prompt)
+                    st.session_state.microlearning_content = response.text
+            
+            if st.session_state.microlearning_content != "":
+                st.divider()
+                st.markdown(st.session_state.microlearning_content)
+                st.divider()
+                
+                if st.button("Mark Module Complete"):
+                    st.balloons()
+                    st.success("🎉 Incredible! You have completed a full Continuous Learning Loop.")
+
+    # --- 4. BURNOUT SUPPORT ---
+    elif choice == "Burnout Support":
+        st.header("Wellbeing & Workload Management")
+        st.write("Log your shift stress or take a quick mindfulness break to reduce burnout.")
+        stress_level = st.slider("How stressful was your shift today? (1 = Very Calm, 10 = Overwhelming)", 1, 10, 5)
+        if st.button("Log Stress Level"):
+            if stress_level > 7:
+                st.warning("It sounds like a tough day. Please take 5 minutes to unplug, and consider reaching out to a peer for support.")
+            else:
+                st.success("Your stress level has been logged. Keep up the great work!")
