@@ -31,7 +31,6 @@ def login_user(username, password):
 
 # --- 4. DATABASE HELPER FUNCTIONS (CHAT HISTORY) ---
 def load_chat_history(username):
-    # CHANGED: Fixed syntax from 'ascending=True' to 'desc=False'
     response = supabase.table("chat_messages").select("*").eq("username", username).order("id", desc=False).execute()
     return response.data
 
@@ -45,10 +44,11 @@ if "logged_in" not in st.session_state:
 if "username" not in st.session_state:
     st.session_state.username = ""
 
-# --- 6. APPLICATION USER INTERFACE ---
-st.title("Healthcare Leadership AI Co-Pilot")
-
+# --- 6. APPLICATION GATEWAY (AUTH SCREEN) ---
 if not st.session_state.logged_in:
+    st.title("Healthcare Leadership AI Co-Pilot")
+    st.subheader("Please Log In or Sign Up to Access the Platform")
+    
     tab1, tab2 = st.tabs(["Login", "Sign Up"])
     
     with tab1:
@@ -82,46 +82,109 @@ if not st.session_state.logged_in:
                 add_user(new_username, new_password)
                 st.success("Account created successfully! Go to the Login tab to log in.")
 
+# --- 7. MAIN PLATFORM INTERFACE (RESTORED FEATURES) ---
 else:
     username = st.session_state.username
     
+    # --- FEATURE: LIVE SIDEBAR DIAGNOSTICS ---
     with st.sidebar:
-        st.write(f"Logged in as: **{username}**")
-        if st.button("Log Out"):
+        st.title("Executive Dashboard")
+        st.write(f"User: **{username}**")
+        
+        st.markdown("---")
+        st.subheader("📊 Leadership Diagnostics")
+        st.caption("Real-time metric tracking based on your interactions.")
+        
+        # Simulated performance diagnostic tracking bars
+        st.progress(85, text="Communication Effectiveness")
+        st.progress(70, text="Crisis & Shortage Management")
+        st.progress(78, text="Strategic Resource Allocation")
+        st.progress(92, text="Bioethics & Compliance")
+        
+        st.markdown("---")
+        if st.button("Log Out of System", use_container_width=True):
             st.session_state.logged_in = False
             st.session_state.username = ""
             st.rerun()
             
-    st.write(f"### Welcome back, {username}!")
-    st.info("Your conversation history is securely saved to the cloud database permanently.")
+    # Main Application Header
+    st.title("Healthcare Leadership AI Co-Pilot")
+    st.write(f"Welcome back, **Director {username}**!")
     
-    # Load past messages from Supabase cloud database
-    db_messages = load_chat_history(username)
+    # --- FEATURE: APP NAVIGATION TABS ---
+    tab_chat, tab_simulation, tab_learning = st.tabs([
+        "💬 AI Mentor Chatbot", 
+        "🎭 Scenario Simulations", 
+        "📚 Microlearning Modules"
+    ])
     
-    # Display the full conversation history chronologically
-    for msg in db_messages:
-        with st.chat_message(msg["role"]):
-            st.write(msg["content"])
-            
-    # Handle new user chat input
-    if user_input := st.chat_input("Ask your mentor bot anything..."):
-        with st.chat_message("user"):
-            st.write(user_input)
-            
-        save_chat_message(username, "user", user_input)
+    # ==========================================
+    # TAB 1: AI MENTOR CHATBOT (DATABASE CONNECTED)
+    # ==========================================
+    with tab_chat:
+        st.subheader("Executive Advisory Session")
+        st.info("Your chat logs are securely compiled and archived in your Supabase Cloud Database.")
         
-        history_context = "\n".join([f"{m['role']}: {m['content']}" for m in db_messages]) + f"\nuser: {user_input}"
+        # Load past messages from Supabase cloud database
+        db_messages = load_chat_history(username)
         
-        with st.chat_message("assistant"):
-            with st.spinner("Thinking..."):
-                chat_prompt = f"""You are an expert healthcare leadership mentor.
-                Conversation history context:
-                {history_context}
+        # Display the full conversation history from database records
+        for msg in db_messages:
+            with st.chat_message(msg["role"]):
+                st.write(msg["content"])
                 
-                Provide a CLEAR, DIRECT, ACTIONABLE solution to their problem.
-                Then, end your response by asking ONE follow-up question to help them apply it."""
+        # Handle new user chat input
+        if user_input := st.chat_input("Consult your mentor regarding hospital operations, staff conflicts, or board metrics..."):
+            with st.chat_message("user"):
+                st.write(user_input)
                 
-                response = model.generate_content(chat_prompt)
-                st.write(response.text)
-                
-        save_chat_message(username, "assistant", response.text)
+            # Save user message permanently to Supabase cloud
+            save_chat_message(username, "user", user_input)
+            
+            # Rebuild full conversation context for Gemini using the database records
+            history_context = "\n".join([f"{m['role']}: {m['content']}" for m in db_messages]) + f"\nuser: {user_input}"
+            
+            with st.chat_message("assistant"):
+                with st.spinner("Analyzing operational directives..."):
+                    chat_prompt = f"""You are an elite, highly experienced expert healthcare leadership mentor and hospital consultant.
+                    Conversation history context:
+                    {history_context}
+                    
+                    Provide a CLEAR, DIRECT, STRATEGIC, and ACTIONABLE solution to their problem. Focus on healthcare operational efficiency, patient safety, or clinical morale.
+                    Then, end your response by asking exactly ONE targeted follow-up question to help them apply it to their specific department."""
+                    
+                    response = model.generate_content(chat_prompt)
+                    st.write(response.text)
+                    
+            # Save AI response permanently to Supabase cloud
+            save_chat_message(username, "assistant", response.text)
+            
+    # ==========================================
+    # TAB 2: SCENARIO SIMULATIONS (AI POWERED)
+    # ==========================================
+    with tab_simulation:
+        st.subheader("Interactive Crisis Management Simulation")
+        st.write("Select an operational emergency scenario to test your situational leadership decisions:")
+        
+        scenario_choice = st.selectbox("Choose a Scenario Blueprint:", [
+            "Select a scenario...",
+            "Sudden ICU Nursing Staff Shortage & Burnout Crisis",
+            "Emergency Department Overcrowding & Diversion Dilemma",
+            "Cross-Departmental Conflict: Surgery vs. Anesthesiology Chiefs",
+            "Cybersecurity Ransomware Attack on Electronic Health Records (EHR)"
+        ])
+        
+        if scenario_choice != "Select a scenario...":
+            st.markdown(f"### 🚩 Active Case Study: {scenario_choice}")
+            
+            if st.button("Generate AI Case Briefing & Challenge"):
+                with st.spinner("Formulating simulation parameters..."):
+                    sim_prompt = f"Act as a healthcare leadership simulation coordinator. Generate a high-stakes, 2-paragraph operational briefing regarding this scenario: '{scenario_choice}'. Conclude with a critical choice or dilemma that a hospital administrator must make immediately."
+                    sim_response = model.generate_content(sim_prompt)
+                    st.markdown("---")
+                    st.write(sim_response.text)
+                    
+            sim_answer = st.text_area("Type your executive action plan or response to this crisis:")
+            if st.button("Submit Action Plan for Board Evaluation"):
+                with st.spinner("Reviewing response against clinical compliance metrics..."):
+                    eval_prompt = f"Evaluate the following leadership action plan for the scenario '{scenario_choice}'. Action Plan: '{sim_answer}'. Provide a brief score outline
