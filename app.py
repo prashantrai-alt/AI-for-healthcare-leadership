@@ -95,7 +95,6 @@ else:
         st.subheader("📊 Leadership Diagnostics")
         st.caption("Real-time metric tracking based on your interactions.")
         
-        # Simulated performance diagnostic tracking bars
         st.progress(85, text="Communication Effectiveness")
         st.progress(70, text="Crisis & Shortage Management")
         st.progress(78, text="Strategic Resource Allocation")
@@ -179,7 +178,9 @@ else:
             
             if st.button("Generate AI Case Briefing & Challenge"):
                 with st.spinner("Formulating simulation parameters..."):
-                    sim_prompt = f"Act as a healthcare leadership simulation coordinator. Generate a high-stakes, 2-paragraph operational briefing regarding this scenario: '{scenario_choice}'. Conclude with a critical choice or dilemma that a hospital administrator must make immediately."
+                    sim_prompt = f"""Act as a healthcare leadership simulation coordinator. 
+                    Generate a high-stakes, 2-paragraph operational briefing regarding this scenario: '{scenario_choice}'. 
+                    Conclude with a critical choice or dilemma that a hospital administrator must make immediately."""
                     sim_response = model.generate_content(sim_prompt)
                     st.markdown("---")
                     st.write(sim_response.text)
@@ -187,4 +188,31 @@ else:
             sim_answer = st.text_area("Type your executive action plan or response to this crisis:")
             if st.button("Submit Action Plan for Board Evaluation"):
                 with st.spinner("Reviewing response against clinical compliance metrics..."):
-                    eval_prompt = f"Evaluate the following leadership action plan for the scenario '{scenario_choice}'. Action Plan: '{sim_answer}'. Provide a brief score outline
+                    # FIXED: Swapped to triple quotes to safely support wrapping code layout strings
+                    eval_prompt = f"""Evaluate the following leadership action plan for the scenario '{scenario_choice}'. 
+                    Action Plan: '{sim_answer}'. 
+                    Provide a brief score outline highlighting Strengths, Hidden Risks, and an Overall Leadership Grade (A, B, C, or F)."""
+                    eval_response = model.generate_content(eval_prompt)
+                    st.success("Board Review Complete!")
+                    st.markdown(eval_response.text)
+
+    # ==========================================
+    # TAB 3: MICROLEARNING MODULES (AI POWERED)
+    # ==========================================
+    with tab_learning:
+        st.subheader("Just-In-Time Executive Microlearning")
+        st.write("Generate custom, high-density professional development briefings on demand.")
+        
+        learning_topic = st.text_input("Enter a leadership skill or framework (e.g., 'Just Culture in Patient Safety', 'Lean Six Sigma in Clinic Workflows', 'Managing Resident Physician Fatigue'):")
+        
+        if st.button("Generate Targeted Micro-Lesson"):
+            if learning_topic.strip() != "":
+                with st.spinner("Synthesizing learning assets..."):
+                    # FIXED: Added triple quotes here as well for safety
+                    lesson_prompt = f"""Create a high-impact, professional microlearning briefing for a healthcare executive regarding: '{learning_topic}'. 
+                    Format it with a 'Core Concept Summary', '3 Direct Actionable Implementation Tactics', and a 'Real-World Hospital Case Example'."""
+                    lesson_response = model.generate_content(lesson_prompt)
+                    st.markdown("---")
+                    st.write(lesson_response.text)
+            else:
+                st.warning("Please type a topic to generate a lesson outline.")
