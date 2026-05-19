@@ -140,7 +140,7 @@ else:
 
     st.sidebar.divider()
 
-    st.sidebar.subheader("🧠 Live Diagnostic Profile")
+    st.sidebar.subheader("Live Diagnostic Profile")
     st.sidebar.info(
         f"**Topic:** {st.session_state.diagnostic_profile.get('topic', 'N/A')}\n\n"
         f"**Emotion:** {st.session_state.diagnostic_profile.get('emotion', 'N/A')}\n\n"
