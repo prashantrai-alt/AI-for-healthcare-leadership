@@ -4,7 +4,6 @@ from supabase import create_client, Client
 import hashlib
 
 # --- 1. INITIALIZE SUPABASE CLIENT ---
-# Pulls credentials safely from your Streamlit Secrets dashboard
 url: str = st.secrets["SUPABASE_URL"]
 key: str = st.secrets["SUPABASE_KEY"]
 supabase: Client = create_client(url, key)
@@ -32,7 +31,8 @@ def login_user(username, password):
 
 # --- 4. DATABASE HELPER FUNCTIONS (CHAT HISTORY) ---
 def load_chat_history(username):
-    response = supabase.table("chat_messages").select("*").eq("username", username).order("id", ascending=True).execute()
+    # CHANGED: Fixed syntax from 'ascending=True' to 'desc=False'
+    response = supabase.table("chat_messages").select("*").eq("username", username).order("id", desc=False).execute()
     return response.data
 
 def save_chat_message(username, role, content):
@@ -48,7 +48,6 @@ if "username" not in st.session_state:
 # --- 6. APPLICATION USER INTERFACE ---
 st.title("Healthcare Leadership AI Co-Pilot")
 
-# GATEWAY: If user is not logged in, show the Auth screen
 if not st.session_state.logged_in:
     tab1, tab2 = st.tabs(["Login", "Sign Up"])
     
@@ -83,11 +82,9 @@ if not st.session_state.logged_in:
                 add_user(new_username, new_password)
                 st.success("Account created successfully! Go to the Login tab to log in.")
 
-# MAIN INTERFACE: Unlocks only when logged_in is True
 else:
     username = st.session_state.username
     
-    # Persistent Sidebar layout
     with st.sidebar:
         st.write(f"Logged in as: **{username}**")
         if st.button("Log Out"):
@@ -98,27 +95,23 @@ else:
     st.write(f"### Welcome back, {username}!")
     st.info("Your conversation history is securely saved to the cloud database permanently.")
     
-    # Step 1: Load past messages from Supabase cloud database
+    # Load past messages from Supabase cloud database
     db_messages = load_chat_history(username)
     
-    # Step 2: Display the full conversation history chronologically
+    # Display the full conversation history chronologically
     for msg in db_messages:
         with st.chat_message(msg["role"]):
             st.write(msg["content"])
             
-    # Step 3: Handle new user chat input
+    # Handle new user chat input
     if user_input := st.chat_input("Ask your mentor bot anything..."):
-        # Display user message instantly on interface
         with st.chat_message("user"):
             st.write(user_input)
             
-        # Permanent save user message to cloud database
         save_chat_message(username, "user", user_input)
         
-        # Rebuild full conversational context for Gemini using the database history
         history_context = "\n".join([f"{m['role']}: {m['content']}" for m in db_messages]) + f"\nuser: {user_input}"
         
-        # Get streaming-like response from Gemini
         with st.chat_message("assistant"):
             with st.spinner("Thinking..."):
                 chat_prompt = f"""You are an expert healthcare leadership mentor.
@@ -131,5 +124,4 @@ else:
                 response = model.generate_content(chat_prompt)
                 st.write(response.text)
                 
-        # Permanent save AI response to cloud database
         save_chat_message(username, "assistant", response.text)
