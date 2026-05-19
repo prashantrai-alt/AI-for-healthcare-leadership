@@ -3,6 +3,8 @@ import google.generativeai as genai
 import json
 import re
 import time
+import hashlib
+from supabase import create_client, Client
 
 # Configure the look of your app
 st.set_page_config(page_title="Continuous Learning AI", layout="wide")
@@ -17,7 +19,6 @@ if "sim_history" not in st.session_state:
 if "sim_active" not in st.session_state:
     st.session_state.sim_active = False
 
-# The Orchestrator's Memory
 if "diagnostic_profile" not in st.session_state:
     st.session_state.diagnostic_profile = {
         "topic": "Pending...", 
@@ -34,36 +35,78 @@ if "logged_in" not in st.session_state:
 if "username" not in st.session_state:
     st.session_state.username = ""
 
-# --- SECURE API KEY SETUP ---
+# --- SECURE API CONNECTIVITY (Gemini & Supabase) ---
 try:
+    # Gemini Setup
     api_key = st.secrets["GEMINI_API_KEY"]
     genai.configure(api_key=api_key)
     model = genai.GenerativeModel('gemini-2.5-flash')
+    
+    # Supabase Setup
+    url: str = st.secrets["SUPABASE_URL"]
+    key: str = st.secrets["SUPABASE_KEY"]
+    supabase: Client = create_client(url, key)
 except KeyError:
-    st.error("⚠️ API Key not found! Please check your .streamlit/secrets.toml file.")
+    st.error("⚠️ Configuration Keys not found! Please check your Streamlit Secrets setting.")
     st.stop()
 
+# --- SECURITY HANDLERS ---
+def make_hashes(password):
+    return hashlib.sha256(str.encode(password)).hexdigest()
+
+def add_userdata(username, password):
+    supabase.table("profiles").insert({"username": username, "password": password}).execute()
+
+def login_user(username, password):
+    response = supabase.table("profiles").select("*").eq("username", username).eq("password", password).execute()
+    return response.data
+
 
 # ==========================================
-# --- LOGIN GATEWAY ---
+# --- SUPABASE LOGIN/SIGNUP GATEWAY ---
 # ==========================================
 if not st.session_state.logged_in:
-    st.subheader("🔒 Secure Login")
-    
-    with st.form("login_form"):
-        username_input = st.text_input("Username")
-        password_input = st.text_input("Password", type="password")
-        submit_button = st.form_submit_button("Login")
-        
-        if submit_button:
-            # Test credentials!
-            if username_input == "dr_smith" and password_input == "health123":
-                st.session_state.logged_in = True
-                st.session_state.username = "Dr. Smith"
-                st.success("Login successful!")
-                st.rerun() 
-            else:
-                st.error("⚠️ Invalid username or password. Please try again.")
+    tab1, tab2 = st.tabs(["Login", "Sign Up"])
+
+    with tab1:
+        st.subheader("Login")
+        with st.form("login_form"):
+            user_log = st.text_input("Username")
+            pass_log = st.text_input("Password", type="password")
+            if st.form_submit_button("Login"):
+                hashed_pswd = make_hashes(pass_log)
+                result = login_user(user_log, hashed_pswd)
+                
+                if result:
+                    st.session_state.logged_in = True
+                    st.session_state.username = user_log
+                    st.success(f"Welcome back, {user_log}!")
+                    st.rerun()
+                else:
+                    st.error("⚠️ Invalid username or password.")
+
+    with tab2:
+        st.subheader("Create New Account")
+        with st.form("signup_form"):
+            new_user = st.text_input("Choose a Username")
+            new_pass = st.text_input("Choose a Password", type="password")
+            confirm_pass = st.text_input("Confirm Password", type="password")
+            
+            if st.form_submit_button("Sign Up"):
+                if new_pass != confirm_pass:
+                    st.error("⚠️ Passwords do not match!")
+                elif len(new_pass) < 4:
+                    st.error("⚠️ Password must be at least 4 characters.")
+                elif not new_user.strip():
+                    st.error("⚠️ Username cannot be blank.")
+                else:
+                    # Check if user already exists
+                    existing = supabase.table("profiles").select("username").eq("username", new_user).execute()
+                    if existing.data:
+                        st.warning("⚠️ Username already exists.")
+                    else:
+                        add_userdata(new_user, make_hashes(new_pass))
+                        st.success("🎉 Account created successfully! You can now log in.")
 
 # ==========================================
 # --- THE MAIN APP (Only runs if logged in) ---
@@ -73,8 +116,9 @@ else:
     st.sidebar.success(f"👤 Welcome back, {st.session_state.username}")
     if st.sidebar.button("Logout"):
         st.session_state.logged_in = False
-        st.session_state.chat_history = [] # Clear history on logout
+        st.session_state.chat_history = [] 
         st.session_state.diagnostic_profile = {"topic": "Pending...", "emotion": "Pending...", "core_skill_needed": "Pending..."}
+        st.session_state.microlearning_content = ""
         st.rerun()
         
     st.sidebar.divider()
@@ -110,7 +154,7 @@ else:
             with st.chat_message("assistant"):
                 with st.spinner("Analyzing your profile and generating advice..."):
                     
-                    # PHASE A: THE SILENT DIAGNOSTIC (Fixed duplicate bug here)
+                    # PHASE A: THE SILENT DIAGNOSTIC
                     diagnostic_prompt = f"""
                     Analyze this healthcare leader's statement: '{user_input}'.
                     Identify the core issue, their emotional state, and the primary leadership skill they need to develop.
@@ -123,7 +167,6 @@ else:
                         profile_data = json.loads(clean_json)
                         st.session_state.diagnostic_profile = profile_data
                         
-                        # Pause to protect the API quota
                         time.sleep(2) 
                     except Exception as e:
                         pass 
